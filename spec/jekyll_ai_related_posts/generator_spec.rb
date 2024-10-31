@@ -71,4 +71,20 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
       site.process
     end
   end
+
+  it "includes body text in embedding_text" do
+    post = OpenStruct.new(
+      data: {
+        "title" => "Test Post",
+        "categories" => ["Category1"],
+        "tags" => ["Tag1"]
+      },
+      content: "This is the body text of the post."
+    )
+
+    generator = JekyllAiRelatedPosts::Generator.new
+    embedding_text = generator.send(:embedding_text, post)
+
+    expect(embedding_text).to include("Body: This is the body text of the post.")
+  end
 end

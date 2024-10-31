@@ -162,6 +162,7 @@ module JekyllAiRelatedPosts
       text = "Title: #{post.data["title"]}"
       text += "; Categories: #{post.data["categories"].join(", ")}" unless post.data["categories"].empty?
       text += "; Tags: #{post.data["tags"].join(", ")}" unless post.data["tags"].empty?
+      text += "; Body: #{post.content}"
 
       text
     end
