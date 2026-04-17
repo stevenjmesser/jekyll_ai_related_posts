@@ -26,14 +26,22 @@ module JekyllAiRelatedPosts
       if fetch_enabled?
         @embeddings_fetcher = new_fetcher
 
-        @site.posts.docs.each do |p|
-          ensure_embedding_cached(p)
-        end
+        begin
+          @site.posts.docs.each do |p|
+            ensure_embedding_cached(p)
+          end
 
-        @site.posts.docs.each do |p|
-          find_related(p)
+          @site.posts.docs.each do |p|
+            find_related(p)
+          end
+          Jekyll.logger.info "AI Related Posts:", "Found #{@stats[:cache_hits]} cached embeddings; fetched #{@stats[:cache_misses]}"
+        rescue LmStudioEmbeddings::ServerUnavailableError
+          Jekyll.logger.warn "AI Related Posts:", "Falling back to cached related posts data because LM Studio is unavailable."
+
+          @site.posts.docs.each do |p|
+            fallback_generate_related(p)
+          end
         end
-        Jekyll.logger.info "AI Related Posts:", "Found #{@stats[:cache_hits]} cached embeddings; fetched #{@stats[:cache_misses]}"
       else
         Jekyll.logger.info "AI Related Posts:", "Fetch disabled. Using cached related posts data."
 
@@ -87,7 +95,10 @@ module JekyllAiRelatedPosts
       when "mock"
         MockEmbeddings.new
       else
-        OpenAiEmbeddings.new(@site.config["ai_related_posts"]["openai_api_key"])
+        LmStudioEmbeddings.new(
+          @site.config["ai_related_posts"]["embedding_model"] || "text-embedding-3-small",
+          base_url: @site.config["ai_related_posts"]["lm_studio_url"] || LmStudioEmbeddings::DEFAULT_BASE_URL
+        )
       end
     end
 
@@ -205,7 +216,7 @@ module JekyllAiRelatedPosts
 
       create_vss_posts = <<-SQL
         CREATE VIRTUAL TABLE IF NOT EXISTS vss_posts using vss0(
-          post_embedding(#{OpenAiEmbeddings::DIMENSIONS})
+          post_embedding(#{LmStudioEmbeddings::DIMENSIONS})
         );
       SQL
       ActiveRecord::Base.connection.execute(create_vss_posts)

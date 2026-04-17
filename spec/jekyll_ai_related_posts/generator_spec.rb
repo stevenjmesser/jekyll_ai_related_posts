@@ -71,4 +71,52 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
       site.process
     end
   end
+
+  describe "#new_fetcher" do
+    it "uses LM Studio with embedding_model config" do
+      generator = described_class.new
+      site = instance_double(
+        Jekyll::Site,
+        config: {
+          "ai_related_posts" => {
+            "embedding_model" => "nomic-embed-text"
+          }
+        }
+      )
+      generator.instance_variable_set(:@site, site)
+
+      fetcher = generator.send(:new_fetcher)
+
+      expect(fetcher).to be_a(JekyllAiRelatedPosts::LmStudioEmbeddings)
+      expect(fetcher.instance_variable_get(:@model)).to eq("nomic-embed-text")
+    end
+  end
+
+  describe "#generate" do
+    it "falls back when LM Studio server is unavailable" do
+      generator = described_class.new
+      posts = [
+        double("post_a", relative_path: "post-a.md", data: {}),
+        double("post_b", relative_path: "post-b.md", data: {})
+      ]
+      site = double(
+        "site",
+        config: {
+          "ai_related_posts" => {
+            "embedding_model" => "nomic-embed-text"
+          }
+        },
+        posts: double("posts", docs: posts)
+      )
+
+      allow(generator).to receive(:setup_database)
+      allow(generator).to receive(:ensure_embedding_cached)
+        .and_raise(JekyllAiRelatedPosts::LmStudioEmbeddings::ServerUnavailableError, "down")
+      allow(generator).to receive(:find_related)
+      expect(generator).to receive(:fallback_generate_related).with(posts[0])
+      expect(generator).to receive(:fallback_generate_related).with(posts[1])
+
+      expect { generator.generate(site) }.not_to raise_error
+    end
+  end
 end
