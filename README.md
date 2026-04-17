@@ -1,26 +1,46 @@
 # Jekyll AI Related Posts 🪄
 
-Rubygems: [jekyll_ai_related_posts](https://rubygems.org/gems/jekyll_ai_related_posts)
+> **This is a fork of [mkasberg/jekyll_ai_related_posts](https://github.com/mkasberg/jekyll_ai_related_posts).**
+> The original plugin used the OpenAI API. This fork replaces that with
+> [LM Studio](https://lmstudio.ai/), so you can generate embeddings locally
+> using a model of your choice — no API key or cloud service required.
 
 Jekyll ships with functionality that populates
 [related_posts](https://jekyllrb.com/docs/variables/) with the ten most recent
 posts. If you install
 [classifier_reborn](https://jekyll.github.io/classifier-reborn/) and use the
 `--lsi` option, Jekyll will populate `related_posts` using latent semantic
-indexing. 
+indexing.
 
 **Using AI is a much better approach.** Latent semantic indexing seems
 promising, but in practice requires libraries like Numo or GSL that are tricky
 to install, and still produces mediocre results. This plugin uses an embeddings
-model served by [LM Studio](https://lmstudio.ai/) to generate vectors and
-compute related posts.
+model served by [LM Studio](https://lmstudio.ai/) to generate vectors locally
+and compute related posts — no API key required.
 
-### Used in Production at
+## Prerequisites: LM Studio
 
-- [MikeKasberg.com](https://www.mikekasberg.com)
+This plugin requires [LM Studio](https://lmstudio.ai/) to be running locally
+with an embeddings model loaded.
 
-(Feel free to open a PR to add your website if you're using this gem in
-production!)
+1. **Download and install LM Studio** from [lmstudio.ai](https://lmstudio.ai/).
+2. **Download an embeddings model.** Open the *Discover* tab in LM Studio and
+   search for an embeddings model. A good starting point is
+   `nomic-ai/nomic-embed-text-v1.5-GGUF`. Click *Download* next to the variant
+   you want.
+3. **Start the local server.** Go to the *Developer* tab (the `<->` icon),
+   select your embeddings model from the model picker, and click *Start
+   Server*. By default the server listens on `http://127.0.0.1:1234`.
+4. **Note the model identifier.** The identifier shown in LM Studio (e.g.
+   `nomic-embed-text-v1.5`) is what you set as `embedding_model` in
+   `_config.yml`. Also note the vector dimensions for your model (e.g. `768`
+   for most `nomic-embed-text` variants) so you can set
+   `embedding_dimensions` correctly.
+
+> **During CI / production builds:** LM Studio only needs to run on the
+> machine that generates embeddings. If the server is unavailable, the plugin
+> falls back to cached embeddings (or Jekyll's default `related_posts` when no
+> cache exists) so your build will still complete.
 
 ## Installation
 
@@ -58,8 +78,8 @@ The only required config is `embedding_model`.
 - **fetch_enabled** (optional, default `true`). If true, fetch embeddings. If
   false, don't fetch embeddings. If this is a string (like `prod`), fetch
   embeddings only when the `JEKYLL_ENV` environment variable is equal to the
-  string. (This is useful if you want to reduce API costs by only fetching
-  embeddings on production builds.)
+  string. (This is useful if you only want to run LM Studio during production
+  builds, not on every local `jekyll serve`.)
 
 ### Example Config
 
@@ -96,9 +116,7 @@ be cached.
 ### Performance
 
 On an example blog with ~100 posts, this plugin produces more accurate results
-than classifier-reborn (LSI) in about the same amount of time. See [this blog
-post](https://www.mikekasberg.com/blog/2024/04/23/better-related-posts-in-jekyll-using-ai.html)
-for details.
+than classifier-reborn (LSI) in about the same amount of time.
 
 ### LM Studio Availability
 
@@ -126,8 +144,7 @@ to your `.gitignore` since it's a binary cache file. However, you _may_ choose
 to check it in to git if, for example, you want to share cached embeddings
 across many machines (and are willing to check in a binary file on the order of
 1-10Mb to do so). If the file is not present, it will be re-created and
-embeddings will be fetched from the API (which may result in higher API usage
-fees if done frequently).
+embeddings will be fetched from LM Studio on the next build.
 
 ## How It Works
 
@@ -155,4 +172,4 @@ push git commits and the created tag, and push the `.gem` file to
 ## Contributing
 
 Bug reports and pull requests are welcome on GitHub at
-https://github.com/mkasberg/jekyll_ai_related_posts.
+https://github.com/stevenjmesser/jekyll_ai_related_posts.
