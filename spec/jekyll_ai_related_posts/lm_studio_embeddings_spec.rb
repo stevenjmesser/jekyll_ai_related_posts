@@ -35,8 +35,25 @@ RSpec.describe JekyllAiRelatedPosts::LmStudioEmbeddings do
     failing_conn = instance_double(Faraday::Connection)
     allow(failing_conn).to receive(:post).and_raise(Faraday::ConnectionFailed, "connection failed")
     fetcher = JekyllAiRelatedPosts::LmStudioEmbeddings.new("nomic-embed-text", connection: failing_conn)
+    logger = double("logger")
+    allow(Jekyll).to receive(:logger).and_return(logger)
+    expect(logger).to receive(:warn).with("AI Related Posts:", "LM Studio server unavailable. Is LM Studio running?")
+    expect(logger).to receive(:warn).with("AI Related Posts:", /Faraday::ConnectionFailed/)
 
-    expect { capture_output { fetcher.embedding_for("My test") } }
+    expect { fetcher.embedding_for("My test") }
       .to raise_error(JekyllAiRelatedPosts::LmStudioEmbeddings::ServerUnavailableError)
+  end
+
+  it "raises an error for malformed LM Studio responses" do
+    stubs.post("/v1/embeddings") do |_env|
+      [
+        200,
+        { "Content-Type" => "application/json" },
+        { data: [] }.to_json
+      ]
+    end
+
+    expect { subject.embedding_for("My test") }
+      .to raise_error(JekyllAiRelatedPosts::Error, /Unexpected response/)
   end
 end

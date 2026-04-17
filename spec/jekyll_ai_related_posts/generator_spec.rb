@@ -90,6 +90,67 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
       expect(fetcher).to be_a(JekyllAiRelatedPosts::LmStudioEmbeddings)
       expect(fetcher.instance_variable_get(:@model)).to eq("nomic-embed-text")
     end
+
+    it "raises when embedding_model is missing for LM Studio" do
+      generator = described_class.new
+      site = instance_double(
+        Jekyll::Site,
+        config: {
+          "ai_related_posts" => {}
+        }
+      )
+      generator.instance_variable_set(:@site, site)
+
+      expect { generator.send(:new_fetcher) }
+        .to raise_error(JekyllAiRelatedPosts::Error, /embedding_model/)
+    end
+  end
+
+  describe "#embedding_dimensions" do
+    it "defaults dimensions when not configured" do
+      generator = described_class.new
+      site = instance_double(
+        Jekyll::Site,
+        config: {
+          "ai_related_posts" => {}
+        }
+      )
+      generator.instance_variable_set(:@site, site)
+
+      expect(generator.send(:embedding_dimensions))
+        .to eq(JekyllAiRelatedPosts::LmStudioEmbeddings::DEFAULT_DIMENSIONS)
+    end
+
+    it "uses configured dimensions" do
+      generator = described_class.new
+      site = instance_double(
+        Jekyll::Site,
+        config: {
+          "ai_related_posts" => {
+            "embedding_dimensions" => 768
+          }
+        }
+      )
+      generator.instance_variable_set(:@site, site)
+
+      expect(generator.send(:embedding_dimensions)).to eq(768)
+    end
+
+    it "raises for invalid configured dimensions" do
+      generator = described_class.new
+      site = instance_double(
+        Jekyll::Site,
+        config: {
+          "ai_related_posts" => {
+            "embedding_dimensions" => "abc"
+          }
+        }
+      )
+      generator.instance_variable_set(:@site, site)
+
+      expect { generator.send(:embedding_dimensions) }
+        .to raise_error(JekyllAiRelatedPosts::Error, /embedding_dimensions/)
+    end
   end
 
   describe "#generate" do

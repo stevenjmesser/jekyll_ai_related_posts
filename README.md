@@ -11,10 +11,9 @@ indexing.
 
 **Using AI is a much better approach.** Latent semantic indexing seems
 promising, but in practice requires libraries like Numo or GSL that are tricky
-to install, and still produces mediocre results. In contrast, OpenAI offers an
-embeddings API that allows us to easily get the embedding vector (in one of
-OpenAI's models) of some text. We can use these vectors to compute related
-posts with the accuracy of OpenAI's models (or any other LLM, for that matter).
+to install, and still produces mediocre results. This plugin uses an embeddings
+model served by [LM Studio](https://lmstudio.ai/) to generate vectors and
+compute related posts.
 
 ### Used in Production at
 
@@ -49,10 +48,13 @@ exclude:
 All config for this plugin sits under a top-level `ai_related_posts` key in
 Jekyll's `_config.yml`.
 
-The only required config is `openai_api_key` -- we need to authenticate to the
-API to fetch embedding vectors.
+The only required config is `embedding_model`.
 
-- **openai_api_key** Your OpenAI API key, used to fetch embeddings.
+- **embedding_model** The embedding model name to request from LM Studio.
+- **lm_studio_url** (optional, default `http://127.0.0.1:1234`). Base URL for
+  the LM Studio server.
+- **embedding_dimensions** (optional, default `1536`). Embedding vector size
+  for your model (for example, `768` for many `nomic-embed-text` setups).
 - **fetch_enabled** (optional, default `true`). If true, fetch embeddings. If
   false, don't fetch embeddings. If this is a string (like `prod`), fetch
   embeddings only when the `JEKYLL_ENV` environment variable is equal to the
@@ -63,7 +65,9 @@ API to fetch embedding vectors.
 
 ```yaml
 ai_related_posts:
-  openai_api_key: sk-proj-abc123
+  embedding_model: nomic-embed-text
+  lm_studio_url: http://127.0.0.1:1234
+  embedding_dimensions: 768
   fetch_enabled: prod
 ```
 
@@ -96,12 +100,11 @@ than classifier-reborn (LSI) in about the same amount of time. See [this blog
 post](https://www.mikekasberg.com/blog/2024/04/23/better-related-posts-in-jekyll-using-ai.html)
 for details.
 
-### Cost
+### LM Studio Availability
 
-The API costs to use this plugin with OpenAI's API are minimal. I ran this
-plugin for all 84 posts on [mikekasberg.com](https://www.mikekasberg.com) for
-$0.00 in API fees (1,277 tokens on the text-embedding-3-small model). (Your
-results may vary, but should remain inexpensive.)
+If LM Studio is not running, the plugin will fail gracefully and fall back to
+cached related-post data (or Jekyll's default `related_posts` when no cache is
+available).
 
 ### Upgrading from Built-In Related Posts
 
@@ -129,15 +132,14 @@ fees if done frequently).
 ## How It Works
 
 Jekyll AI Related Posts is implemented as a Jekyll Generator plugin. During the
-build process, the plugin will call the [OpenAI Embeddings
-API](https://platform.openai.com/docs/guides/embeddings) to fetch the vector
-embedding for a string containing the title, tags, and categories of your
-article. It's not necessary to use the full post text, in most cases the title
-and tags produce very accurate results because the LLM knows when topics are
-related even if they never use identical words. This is also why the LLM
-produces better results than LSI. These vector embeddings are cached in a SQLite
-database. To query for related posts, we query the cached vectors using the
-[sqlite-vss](https://github.com/asg017/sqlite-vss) plugin.
+build process, the plugin calls LM Studio's OpenAI-compatible embeddings
+endpoint to fetch the vector embedding for a string containing the title, tags,
+and categories of your article. It's not necessary to use the full post text,
+in most cases the title and tags produce very accurate results because the LLM
+knows when topics are related even if they never use identical words. This is
+also why the LLM produces better results than LSI. These vector embeddings are
+cached in a SQLite database. To query for related posts, we query the cached
+vectors using the [sqlite-vss](https://github.com/asg017/sqlite-vss) plugin.
 
 ## Development
 
@@ -154,4 +156,3 @@ push git commits and the created tag, and push the `.gem` file to
 
 Bug reports and pull requests are welcome on GitHub at
 https://github.com/mkasberg/jekyll_ai_related_posts.
-

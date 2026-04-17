@@ -95,11 +95,32 @@ module JekyllAiRelatedPosts
       when "mock"
         MockEmbeddings.new
       else
+        model = @site.config["ai_related_posts"]["embedding_model"]
+        if model.nil? || model.strip.empty?
+          raise JekyllAiRelatedPosts::Error, "Missing required `ai_related_posts.embedding_model` config"
+        end
+
         LmStudioEmbeddings.new(
-          @site.config["ai_related_posts"]["embedding_model"] || "text-embedding-3-small",
+          model,
           base_url: @site.config["ai_related_posts"]["lm_studio_url"] || LmStudioEmbeddings::DEFAULT_BASE_URL
         )
       end
+    end
+
+    def embedding_dimensions
+      configured = @site.config["ai_related_posts"]["embedding_dimensions"]
+      return LmStudioEmbeddings::DEFAULT_DIMENSIONS if configured.nil?
+
+      dimensions = Integer(configured, exception: false)
+      if dimensions.nil?
+        raise JekyllAiRelatedPosts::Error, "`ai_related_posts.embedding_dimensions` must be a valid integer"
+      end
+
+      if dimensions <= 0
+        raise JekyllAiRelatedPosts::Error, "`ai_related_posts.embedding_dimensions` must be a positive integer"
+      end
+
+      dimensions
     end
 
     def ensure_embedding_cached(post)
@@ -216,7 +237,7 @@ module JekyllAiRelatedPosts
 
       create_vss_posts = <<-SQL
         CREATE VIRTUAL TABLE IF NOT EXISTS vss_posts using vss0(
-          post_embedding(#{LmStudioEmbeddings::DIMENSIONS})
+          post_embedding(#{embedding_dimensions})
         );
       SQL
       ActiveRecord::Base.connection.execute(create_vss_posts)
