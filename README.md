@@ -1,27 +1,46 @@
 # Jekyll AI Related Posts 🪄
 
-Rubygems: [jekyll_ai_related_posts](https://rubygems.org/gems/jekyll_ai_related_posts)
+> **This is a fork of [mkasberg/jekyll_ai_related_posts](https://github.com/mkasberg/jekyll_ai_related_posts).**
+> The original plugin used the OpenAI API. This fork replaces that with
+> [LM Studio](https://lmstudio.ai/), so you can generate embeddings locally
+> using a model of your choice — no API key or cloud service required.
 
 Jekyll ships with functionality that populates
 [related_posts](https://jekyllrb.com/docs/variables/) with the ten most recent
 posts. If you install
 [classifier_reborn](https://jekyll.github.io/classifier-reborn/) and use the
 `--lsi` option, Jekyll will populate `related_posts` using latent semantic
-indexing. 
+indexing.
 
 **Using AI is a much better approach.** Latent semantic indexing seems
 promising, but in practice requires libraries like Numo or GSL that are tricky
-to install, and still produces mediocre results. In contrast, OpenAI offers an
-embeddings API that allows us to easily get the embedding vector (in one of
-OpenAI's models) of some text. We can use these vectors to compute related
-posts with the accuracy of OpenAI's models (or any other LLM, for that matter).
+to install, and still produces mediocre results. This plugin uses an embeddings
+model served by [LM Studio](https://lmstudio.ai/) to generate vectors locally
+and compute related posts — no API key required.
 
-### Used in Production at
+## Prerequisites: LM Studio
 
-- [MikeKasberg.com](https://www.mikekasberg.com)
+This plugin requires [LM Studio](https://lmstudio.ai/) to be running locally
+with an embeddings model loaded.
 
-(Feel free to open a PR to add your website if you're using this gem in
-production!)
+1. **Download and install LM Studio** from [lmstudio.ai](https://lmstudio.ai/).
+2. **Download an embeddings model.** Open the *Discover* tab in LM Studio and
+   search for an embeddings model. A good starting point is
+   `nomic-ai/nomic-embed-text-v1.5-GGUF`. Click *Download* next to the variant
+   you want.
+3. **Start the local server.** Go to the *Developer* tab (the `<->` icon),
+   select your embeddings model from the model picker, and click *Start
+   Server*. By default the server listens on `http://127.0.0.1:1234`.
+4. **Note the model identifier.** The identifier shown in LM Studio (e.g.
+   `nomic-embed-text-v1.5`) is what you set as `embedding_model` in
+   `_config.yml`. Also note the vector dimensions for your model (e.g. `768`
+   for most `nomic-embed-text` variants) so you can set
+   `embedding_dimensions` correctly.
+
+> **During CI / production builds:** LM Studio only needs to run on the
+> machine that generates embeddings. If the server is unavailable, the plugin
+> falls back to cached embeddings (or Jekyll's default `related_posts` when no
+> cache exists) so your build will still complete.
 
 ## Installation
 
@@ -49,21 +68,26 @@ exclude:
 All config for this plugin sits under a top-level `ai_related_posts` key in
 Jekyll's `_config.yml`.
 
-The only required config is `openai_api_key` -- we need to authenticate to the
-API to fetch embedding vectors.
+The only required config is `embedding_model`.
 
-- **openai_api_key** Your OpenAI API key, used to fetch embeddings.
+- **embedding_model** The embedding model name to request from LM Studio.
+- **lm_studio_url** (optional, default `http://127.0.0.1:1234`). Base URL for
+  the LM Studio server.
+- **embedding_dimensions** (optional, default `1536`). Embedding vector size
+  for your model (for example, `768` for many `nomic-embed-text` setups).
 - **fetch_enabled** (optional, default `true`). If true, fetch embeddings. If
   false, don't fetch embeddings. If this is a string (like `prod`), fetch
   embeddings only when the `JEKYLL_ENV` environment variable is equal to the
-  string. (This is useful if you want to reduce API costs by only fetching
-  embeddings on production builds.)
+  string. (This is useful if you only want to run LM Studio during production
+  builds, not on every local `jekyll serve`.)
 
 ### Example Config
 
 ```yaml
 ai_related_posts:
-  openai_api_key: sk-proj-abc123
+  embedding_model: nomic-embed-text
+  lm_studio_url: http://127.0.0.1:1234
+  embedding_dimensions: 768
   fetch_enabled: prod
 ```
 
@@ -92,16 +116,13 @@ be cached.
 ### Performance
 
 On an example blog with ~100 posts, this plugin produces more accurate results
-than classifier-reborn (LSI) in about the same amount of time. See [this blog
-post](https://www.mikekasberg.com/blog/2024/04/23/better-related-posts-in-jekyll-using-ai.html)
-for details.
+than classifier-reborn (LSI) in about the same amount of time.
 
-### Cost
+### LM Studio Availability
 
-The API costs to use this plugin with OpenAI's API are minimal. I ran this
-plugin for all 84 posts on [mikekasberg.com](https://www.mikekasberg.com) for
-$0.00 in API fees (1,277 tokens on the text-embedding-3-small model). (Your
-results may vary, but should remain inexpensive.)
+If LM Studio is not running, the plugin will fail gracefully and fall back to
+cached related-post data (or Jekyll's default `related_posts` when no cache is
+available).
 
 ### Upgrading from Built-In Related Posts
 
@@ -123,21 +144,19 @@ to your `.gitignore` since it's a binary cache file. However, you _may_ choose
 to check it in to git if, for example, you want to share cached embeddings
 across many machines (and are willing to check in a binary file on the order of
 1-10Mb to do so). If the file is not present, it will be re-created and
-embeddings will be fetched from the API (which may result in higher API usage
-fees if done frequently).
+embeddings will be fetched from LM Studio on the next build.
 
 ## How It Works
 
 Jekyll AI Related Posts is implemented as a Jekyll Generator plugin. During the
-build process, the plugin will call the [OpenAI Embeddings
-API](https://platform.openai.com/docs/guides/embeddings) to fetch the vector
-embedding for a string containing the title, tags, and categories of your
-article. It's not necessary to use the full post text, in most cases the title
-and tags produce very accurate results because the LLM knows when topics are
-related even if they never use identical words. This is also why the LLM
-produces better results than LSI. These vector embeddings are cached in a SQLite
-database. To query for related posts, we query the cached vectors using the
-[sqlite-vss](https://github.com/asg017/sqlite-vss) plugin.
+build process, the plugin calls LM Studio's OpenAI-compatible embeddings
+endpoint to fetch the vector embedding for a string containing the title, tags,
+and categories of your article. It's not necessary to use the full post text,
+in most cases the title and tags produce very accurate results because the LLM
+knows when topics are related even if they never use identical words. This is
+also why the LLM produces better results than LSI. These vector embeddings are
+cached in a SQLite database. To query for related posts, we query the cached
+vectors using the [sqlite-vss](https://github.com/asg017/sqlite-vss) plugin.
 
 ## Development
 
@@ -153,5 +172,4 @@ push git commits and the created tag, and push the `.gem` file to
 ## Contributing
 
 Bug reports and pull requests are welcome on GitHub at
-https://github.com/mkasberg/jekyll_ai_related_posts.
-
+https://github.com/stevenjmesser/jekyll_ai_related_posts.

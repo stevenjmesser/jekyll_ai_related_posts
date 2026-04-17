@@ -8,8 +8,8 @@ Gem::Specification.new do |spec|
   spec.authors = [ "Mike Kasberg" ]
   spec.email = [ "kasberg.mike@gmail.com" ]
 
-  spec.summary = "Populate ai_related_posts using Open AI embeddings"
-  spec.description = "Populate ai_related_posts using Open AI embeddings"
+  spec.summary = "Populate ai_related_posts using LM Studio embeddings"
+  spec.description = "Populate ai_related_posts using LM Studio embeddings"
   spec.homepage = "https://github.com/mkasberg/jekyll_ai_related_posts"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
