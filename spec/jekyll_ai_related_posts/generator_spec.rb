@@ -223,17 +223,21 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
     end
 
     it "passes title, description, summary, categories, and tags to embeddings" do
-      summarizer = instance_double(JekyllAiRelatedPosts::LmStudioSummarizer, summarize: "Topics:\n- Test\nAbstract:\nShort abstract.")
+      generated_summary = "Topics:\n- Test\nAbstract:\nShort abstract."
+      summarizer = instance_double(JekyllAiRelatedPosts::LmStudioSummarizer, summarize: generated_summary)
       embeddings = instance_double(JekyllAiRelatedPosts::LmStudioEmbeddings)
       generator.instance_variable_set(:@summarizer, summarizer)
       generator.instance_variable_set(:@embeddings_fetcher, embeddings)
       allow(JekyllAiRelatedPosts::Models::Post).to receive(:find_by).and_return(nil)
       allow(JekyllAiRelatedPosts::Models::Post).to receive(:create!)
 
-      expected_input = "Title: Test Title; Description: Front matter description; Summary: Topics:\n" \
-                       "- Test\n" \
-                       "Abstract:\n" \
-                       "Short abstract.; Categories: Jekyll; Tags: Ruby"
+      expected_input = [
+        "Title: Test Title",
+        "Description: Front matter description",
+        "Summary: #{generated_summary}",
+        "Categories: Jekyll",
+        "Tags: Ruby"
+      ].join("; ")
       expect(embeddings).to receive(:embedding_for).with(expected_input).and_return([ 0.1, 0.2 ])
 
       generator.send(:ensure_embedding_cached, post)

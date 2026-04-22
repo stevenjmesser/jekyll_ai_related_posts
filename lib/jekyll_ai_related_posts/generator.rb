@@ -129,7 +129,7 @@ module JekyllAiRelatedPosts
 
     def summary_enabled?
       enabled = @site.config["ai_related_posts"]["summary_enabled"]
-      enabled != false
+      enabled.nil? || enabled
     end
 
     def summary_model
@@ -172,7 +172,7 @@ module JekyllAiRelatedPosts
         "Description: #{post.data["description"].to_s.strip}",
         "Categories: #{Array(post.data["categories"]).join(", ")}",
         "Tags: #{Array(post.data["tags"]).join(", ")}",
-        "Content: #{post.content}",
+        "Content: #{post.content.to_s[0, summary_max_chars]}",
         "Summary Model: #{summary_model}",
         "Summary Prompt: #{summary_prompt}",
         "Summary Max Chars: #{summary_max_chars}"
