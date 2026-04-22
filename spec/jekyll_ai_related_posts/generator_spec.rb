@@ -8,7 +8,8 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
     {
       "ai_related_posts" => {
         "openai_api_key" => "my_key",
-        "embeddings_source" => "mock"
+        "embeddings_source" => "mock",
+        "summary_enabled" => false
       }
     }
   end
@@ -57,13 +58,14 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
   context "fetch disabled" do
     let(:config_overrides) do
       {
-        "ai_related_posts" => {
-          "openai_api_key" => "my_key",
-          "embeddings_source" => "mock",
-          "fetch_enabled" => false
+          "ai_related_posts" => {
+            "openai_api_key" => "my_key",
+            "embeddings_source" => "mock",
+            "fetch_enabled" => false,
+            "summary_enabled" => false
+          }
         }
-      }
-    end
+      end
 
     it "does not fetch embeddings from the API" do
       expect_any_instance_of(MockEmbeddings).not_to receive(:embedding_for)
@@ -79,7 +81,8 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
         Jekyll::Site,
         config: {
           "ai_related_posts" => {
-            "embedding_model" => "nomic-embed-text"
+            "embedding_model" => "nomic-embed-text",
+            "summary_enabled" => false
           }
         }
       )
@@ -164,7 +167,8 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
         "site",
         config: {
           "ai_related_posts" => {
-            "embedding_model" => "nomic-embed-text"
+            "embedding_model" => "nomic-embed-text",
+            "summary_enabled" => false
           }
         },
         posts: double("posts", docs: posts)
@@ -178,6 +182,83 @@ RSpec.describe JekyllAiRelatedPosts::Generator do
       expect(generator).to receive(:fallback_generate_related).with(posts[1])
 
       expect { generator.generate(site) }.not_to raise_error
+    end
+  end
+
+  describe "#ensure_embedding_cached with summarization" do
+    let(:generator) { described_class.new }
+    let(:connection) { instance_double(ActiveRecord::ConnectionAdapters::AbstractAdapter) }
+    let(:generator_site) do
+      instance_double(
+        Jekyll::Site,
+        config: {
+          "ai_related_posts" => {
+            "embedding_model" => "nomic-embed-text",
+            "summary_enabled" => true,
+            "summary_model" => "qwen2.5"
+          }
+        }
+      )
+    end
+    let(:post) do
+      instance_double(
+        Jekyll::Document,
+        relative_path: "post-a.md",
+        content: "Post body content",
+        data: {
+          "title" => "Test Title",
+          "description" => "Front matter description",
+          "categories" => [ "Jekyll" ],
+          "tags" => [ "Ruby" ]
+        }
+      )
+    end
+
+    before do
+      generator.instance_variable_set(:@site, generator_site)
+      generator.instance_variable_set(:@stats, { cache_hits: 0, cache_misses: 0 })
+      allow(ActiveRecord::Base).to receive(:connection).and_return(connection)
+      allow(ActiveRecord::Base).to receive(:sanitize_sql) { |args| args.first }
+      allow(connection).to receive(:execute)
+    end
+
+    it "passes title, description, summary, categories, and tags to embeddings" do
+      summarizer = instance_double(JekyllAiRelatedPosts::LmStudioSummarizer, summarize: "Topics:\n- Test\nAbstract:\nShort abstract.")
+      embeddings = instance_double(JekyllAiRelatedPosts::LmStudioEmbeddings)
+      generator.instance_variable_set(:@summarizer, summarizer)
+      generator.instance_variable_set(:@embeddings_fetcher, embeddings)
+      allow(JekyllAiRelatedPosts::Models::Post).to receive(:find_by).and_return(nil)
+      allow(JekyllAiRelatedPosts::Models::Post).to receive(:create!)
+
+      expected_input = "Title: Test Title; Description: Front matter description; Summary: Topics:\n" \
+                       "- Test\n" \
+                       "Abstract:\n" \
+                       "Short abstract.; Categories: Jekyll; Tags: Ruby"
+      expect(embeddings).to receive(:embedding_for).with(expected_input).and_return([ 0.1, 0.2 ])
+
+      generator.send(:ensure_embedding_cached, post)
+    end
+
+    it "reuses cached summary when summary input is unchanged" do
+      summary = "Topics:\n- Cached topic\nAbstract:\nCached abstract."
+      summary_hash = generator.send(:summary_input_hash, post)
+      cached_embedding_text = generator.send(:embedding_text, post, summary: summary)
+      existing = double(
+        "existing_post",
+        summary: summary,
+        summary_input_hash: summary_hash,
+        embedding_text: cached_embedding_text
+      )
+      summarizer = instance_double(JekyllAiRelatedPosts::LmStudioSummarizer)
+      embeddings = instance_double(JekyllAiRelatedPosts::LmStudioEmbeddings)
+      generator.instance_variable_set(:@summarizer, summarizer)
+      generator.instance_variable_set(:@embeddings_fetcher, embeddings)
+      allow(JekyllAiRelatedPosts::Models::Post).to receive(:find_by).and_return(existing)
+
+      expect(summarizer).not_to receive(:summarize)
+      expect(embeddings).not_to receive(:embedding_for)
+
+      generator.send(:ensure_embedding_cached, post)
     end
   end
 end

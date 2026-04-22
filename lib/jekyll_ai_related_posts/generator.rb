@@ -5,6 +5,7 @@ require "sqlite3"
 require "sqlite_vss"
 require "jekyll"
 require "json"
+require "digest"
 
 module JekyllAiRelatedPosts
   class Generator < Jekyll::Generator
@@ -25,6 +26,7 @@ module JekyllAiRelatedPosts
 
       if fetch_enabled?
         @embeddings_fetcher = new_fetcher
+        @summarizer = new_summarizer if summary_enabled?
 
         begin
           @site.posts.docs.each do |p|
@@ -35,7 +37,7 @@ module JekyllAiRelatedPosts
             find_related(p)
           end
           Jekyll.logger.info "AI Related Posts:", "Found #{@stats[:cache_hits]} cached embeddings; fetched #{@stats[:cache_misses]}"
-        rescue LmStudioEmbeddings::ServerUnavailableError
+        rescue LmStudioEmbeddings::ServerUnavailableError, LmStudioSummarizer::ServerUnavailableError
           Jekyll.logger.warn "AI Related Posts:", "Falling back to cached related posts data because LM Studio is unavailable."
 
           @site.posts.docs.each do |p|
@@ -81,7 +83,9 @@ module JekyllAiRelatedPosts
         @stats[:cache_misses] += 1
         post.data["ai_related_posts"] = post.related_posts
       else
-        if existing.embedding_text == embedding_text(post)
+        if summary_stale?(post, existing)
+          @stats[:cache_misses] += 1
+        elsif existing.embedding_text == embedding_text(post, summary: existing.summary)
           @stats[:cache_hits] += 1
         else
           @stats[:cache_misses] += 1
@@ -123,11 +127,91 @@ module JekyllAiRelatedPosts
       dimensions
     end
 
+    def summary_enabled?
+      enabled = @site.config["ai_related_posts"]["summary_enabled"]
+      enabled != false
+    end
+
+    def summary_model
+      model = @site.config["ai_related_posts"]["summary_model"]
+      if model.nil? || model.strip.empty?
+        raise JekyllAiRelatedPosts::Error, "Missing required `ai_related_posts.summary_model` config"
+      end
+
+      model
+    end
+
+    def summary_max_chars
+      configured = @site.config["ai_related_posts"]["summary_max_chars"]
+      return LmStudioSummarizer::DEFAULT_MAX_CHARS if configured.nil?
+
+      max_chars = Integer(configured, exception: false)
+      if max_chars.nil? || max_chars <= 0
+        raise JekyllAiRelatedPosts::Error, "`ai_related_posts.summary_max_chars` must be a positive integer"
+      end
+
+      max_chars
+    end
+
+    def summary_prompt
+      @site.config["ai_related_posts"]["summary_prompt"] || LmStudioSummarizer::DEFAULT_PROMPT
+    end
+
+    def new_summarizer
+      LmStudioSummarizer.new(
+        summary_model,
+        base_url: @site.config["ai_related_posts"]["lm_studio_url"] || LmStudioEmbeddings::DEFAULT_BASE_URL,
+        prompt: summary_prompt,
+        max_chars: summary_max_chars
+      )
+    end
+
+    def summary_source_text(post)
+      [
+        "Title: #{post.data["title"]}",
+        "Description: #{post.data["description"].to_s.strip}",
+        "Categories: #{Array(post.data["categories"]).join(", ")}",
+        "Tags: #{Array(post.data["tags"]).join(", ")}",
+        "Content: #{post.content}",
+        "Summary Model: #{summary_model}",
+        "Summary Prompt: #{summary_prompt}",
+        "Summary Max Chars: #{summary_max_chars}"
+      ].join("\n")
+    end
+
+    def summary_input_hash(post)
+      return nil unless summary_enabled?
+
+      Digest::SHA256.hexdigest(summary_source_text(post))
+    end
+
+    def summary_stale?(post, existing)
+      return false unless summary_enabled?
+      return true if existing.summary.to_s.strip.empty?
+
+      existing.summary_input_hash != summary_input_hash(post)
+    end
+
+    def summary_for(post, existing)
+      return [ nil, nil ] unless summary_enabled?
+
+      input_hash = summary_input_hash(post)
+      if !existing.nil? && existing.summary_input_hash == input_hash && !existing.summary.to_s.strip.empty?
+        return [ existing.summary, input_hash ]
+      end
+
+      Jekyll.logger.info "AI Related Posts:", "Fetching summary for #{post.relative_path}"
+      summary = @summarizer.summarize(post.content.to_s)
+      [ summary, input_hash ]
+    end
+
     def ensure_embedding_cached(post)
       existing = Models::Post.find_by(relative_path: post.relative_path)
+      summary, summary_hash = summary_for(post, existing)
+      input = embedding_text(post, summary: summary)
 
       # Clear cache if post has been updated
-      if !existing.nil? && existing.embedding_text != embedding_text(post)
+      if !existing.nil? && existing.embedding_text != input
         sql = "DELETE FROM vss_posts WHERE rowid = (SELECT rowid FROM posts WHERE relative_path = :relative_path);"
         ActiveRecord::Base.connection.execute(ActiveRecord::Base.sanitize_sql([ sql,
                                                                                { relative_path: post.relative_path } ]))
@@ -140,8 +224,10 @@ module JekyllAiRelatedPosts
 
         Models::Post.create!(
           relative_path: post.relative_path,
-          embedding_text: embedding_text(post),
-          embedding: embedding_for(post).to_json
+          embedding_text: input,
+          embedding: embedding_for(post, input).to_json,
+          summary: summary,
+          summary_input_hash: summary_hash
         )
 
         sql = <<-SQL
@@ -190,17 +276,23 @@ module JekyllAiRelatedPosts
       post.data["ai_related_posts"] = related_posts
     end
 
-    def embedding_text(post)
+    def embedding_text(post, summary: nil)
       text = "Title: #{post.data["title"]}"
-      text += "; Categories: #{post.data["categories"].join(", ")}" unless post.data["categories"].empty?
-      text += "; Tags: #{post.data["tags"].join(", ")}" unless post.data["tags"].empty?
+      description = post.data["description"].to_s.strip
+      text += "; Description: #{description}" unless description.empty?
+      summary_text = summary.to_s.strip
+      text += "; Summary: #{summary_text}" unless summary_text.empty?
+      categories = Array(post.data["categories"])
+      text += "; Categories: #{categories.join(", ")}" unless categories.empty?
+      tags = Array(post.data["tags"])
+      text += "; Tags: #{tags.join(", ")}" unless tags.empty?
 
       text
     end
 
-    def embedding_for(post)
+    def embedding_for(post, input = nil)
       Jekyll.logger.info "AI Related Posts:", "Fetching embedding for #{post.relative_path}"
-      input = embedding_text(post)
+      input ||= embedding_text(post)
 
       @embeddings_fetcher.embedding_for(input)
     end
@@ -230,10 +322,13 @@ module JekyllAiRelatedPosts
         CREATE TABLE IF NOT EXISTS posts(
           relative_path TEXT PRIMARY KEY,
           embedding_text TEXT,
-          embedding TEXT
+          embedding TEXT,
+          summary TEXT,
+          summary_input_hash TEXT
         );
       SQL
       ActiveRecord::Base.connection.execute(create_posts)
+      migrate_posts_table_columns!
 
       create_vss_posts = <<-SQL
         CREATE VIRTUAL TABLE IF NOT EXISTS vss_posts using vss0(
@@ -243,6 +338,19 @@ module JekyllAiRelatedPosts
       ActiveRecord::Base.connection.execute(create_vss_posts)
 
       Jekyll.logger.debug "AI Related Posts:", "DB setup complete"
+    end
+
+    def migrate_posts_table_columns!
+      columns = ActiveRecord::Base.connection.execute("PRAGMA table_info(posts);")
+      column_names = columns.map { |c| c["name"] || c[1] }
+
+      unless column_names.include?("summary")
+        ActiveRecord::Base.connection.execute("ALTER TABLE posts ADD COLUMN summary TEXT;")
+      end
+
+      unless column_names.include?("summary_input_hash")
+        ActiveRecord::Base.connection.execute("ALTER TABLE posts ADD COLUMN summary_input_hash TEXT;")
+      end
     end
   end
 end
