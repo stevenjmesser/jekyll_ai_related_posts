@@ -68,13 +68,26 @@ exclude:
 All config for this plugin sits under a top-level `ai_related_posts` key in
 Jekyll's `_config.yml`.
 
-The only required config is `embedding_model`.
+Required config:
+
+- `embedding_model`
+- `summary_model` (when `summary_enabled` is true, which is the default)
 
 - **embedding_model** The embedding model name to request from LM Studio.
 - **lm_studio_url** (optional, default `http://127.0.0.1:1234`). Base URL for
   the LM Studio server.
 - **embedding_dimensions** (optional, default `1536`). Embedding vector size
   for your model (for example, `768` for many `nomic-embed-text` setups).
+- **summary_enabled** (optional, default `true`). If true, generate and cache a
+  local LM Studio summary for each post and include it in the embedding input.
+- **summary_model** (required when `summary_enabled` is true). The chat model
+  identifier to request from LM Studio's OpenAI-compatible chat completions
+  endpoint.
+- **summary_max_chars** (optional, default `8000`). Maximum post-content
+  characters sent to the summarizer.
+- **summary_prompt** (optional). Override the summarizer prompt. The default
+  prompt asks for a `Topics:` section with 5-8 bullet topics and an `Abstract:`
+  section with 1-2 sentences.
 - **fetch_enabled** (optional, default `true`). If true, fetch embeddings. If
   false, don't fetch embeddings. If this is a string (like `prod`), fetch
   embeddings only when the `JEKYLL_ENV` environment variable is equal to the
@@ -86,8 +99,11 @@ The only required config is `embedding_model`.
 ```yaml
 ai_related_posts:
   embedding_model: nomic-embed-text
+  summary_model: qwen2.5-7b-instruct
+  summary_enabled: true
   lm_studio_url: http://127.0.0.1:1234
   embedding_dimensions: 768
+  summary_max_chars: 8000
   fetch_enabled: prod
 ```
 
@@ -144,19 +160,26 @@ to your `.gitignore` since it's a binary cache file. However, you _may_ choose
 to check it in to git if, for example, you want to share cached embeddings
 across many machines (and are willing to check in a binary file on the order of
 1-10Mb to do so). If the file is not present, it will be re-created and
-embeddings will be fetched from LM Studio on the next build.
+embeddings and generated summaries will be fetched from LM Studio on the next
+build.
 
 ## How It Works
 
 Jekyll AI Related Posts is implemented as a Jekyll Generator plugin. During the
-build process, the plugin calls LM Studio's OpenAI-compatible embeddings
-endpoint to fetch the vector embedding for a string containing the title, tags,
-and categories of your article. It's not necessary to use the full post text,
-in most cases the title and tags produce very accurate results because the LLM
-knows when topics are related even if they never use identical words. This is
-also why the LLM produces better results than LSI. These vector embeddings are
-cached in a SQLite database. To query for related posts, we query the cached
-vectors using the [sqlite-vss](https://github.com/asg017/sqlite-vss) plugin.
+build process, the plugin can run a local two-stage pipeline:
+
+1. Summarize each post with LM Studio's OpenAI-compatible chat completions API
+   (`/v1/chat/completions`). The summary is cached in SQLite and formatted as
+   `Topics:` (5-8 bullet topics) plus `Abstract:` (1-2 sentences).
+2. Fetch an embedding from LM Studio's OpenAI-compatible embeddings endpoint
+   using a compact string that includes title, optional description, cached
+   summary, categories, and tags.
+
+This two-stage approach helps smaller embedding models by compressing long post
+content into high-signal topics and an abstract before embedding. Both
+summaries and embeddings are cached in SQLite. To query for related posts, we
+query the cached vectors using the
+[sqlite-vss](https://github.com/asg017/sqlite-vss) plugin.
 
 ## Development
 
