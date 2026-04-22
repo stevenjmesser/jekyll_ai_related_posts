@@ -7,7 +7,7 @@ module JekyllAiRelatedPosts
     DEFAULT_MAX_CHARS = 8000
     DEFAULT_PROMPT = <<~PROMPT.strip
       Summarize the provided blog post content for related-post embeddings.
-      Format your output exactly as:
+      YOU MUST format your output exactly as:
       Topics:
       - <topic 1>
       - <topic 2>
@@ -19,6 +19,7 @@ module JekyllAiRelatedPosts
       - <optional topic 8>
       Abstract:
       <1-2 sentence abstract>
+      DO NOT prepend or append the output.
     PROMPT
 
     class ServerUnavailableError < JekyllAiRelatedPosts::Error; end
